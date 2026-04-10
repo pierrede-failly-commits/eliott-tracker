@@ -115,7 +115,6 @@
         const state = {
             horaire: "",
             scores: {},
-            // CORRECTION: Utilisation de sessionStorage au lieu de localStorage
             user: sessionStorage.getItem('eliott_user') || "",
             constatVisible: false,
         };
@@ -137,12 +136,16 @@
             const { horaire, scores, user, constatVisible } = state;
             const players = Object.entries(scores).map(([nom, v]) => ({ nom, ...v }));
             const me = players.find(p => p.nom === user);
+            
+            // Calcul si l'utilisateur actuel a parié
             const myBetPlaced = me && me.pari_mise && me.pari_mise !== "" && me.pari_mise !== "0";
 
+            // Écrans principaux
             show('setup-screen',  !horaire);
             show('login-screen',  !!horaire && !user);
             show('main-screen',   !!horaire && !!user);
 
+            // Setup : sélection utilisateur
             if (!user) {
                 const list = document.getElementById('user-list');
                 if (list.innerHTML === "") {
@@ -152,7 +155,6 @@
                         b.innerText = p;
                         b.onclick = () => { 
                             state.user = p; 
-                            // CORRECTION: Sauvegarde dans la session de l'onglet uniquement
                             sessionStorage.setItem('eliott_user', p); 
                             render(); 
                         };
@@ -161,16 +163,25 @@
                 }
             }
 
+            // Écran principal logged in
             if (horaire && user) {
                 document.getElementById('welcome-msg').innerText = "Salut " + user;
                 document.getElementById('user-balance').innerText = (me && me.score !== undefined ? me.score : 0) + " EC";
                 document.getElementById('display-target').innerText = "Cible : " + horaire;
 
+                // Zone de pari : visible si pas parié ET constat pas ouvert
                 show('bet-zone',       !myBetPlaced && !constatVisible);
-                show('flash-container', !!myBetPlaced && !constatVisible);
+                
+                // --- CORRECTION ---
+                // Le bouton flash n'est visible que si J'AI parié ET que le constat n'est pas déjà ouvert
+                // Il ne dépend pas des paris des autres.
+                show('flash-container', myBetPlaced && !constatVisible);
+                
+                // Zone de constat (validation officielle)
                 show('constat-zone',    constatVisible);
             }
 
+            // Leaderboard
             const lb = `
                 <div class="mt-2">
                     <h3 class="text-[10px] font-black text-gray-500 uppercase mb-4 tracking-widest text-center">🏆 Espionnage des Paris</h3>
@@ -198,45 +209,61 @@
         }
 
         function show(id, visible) {
-            document.getElementById(id).classList.toggle('hidden', !visible);
+            const el = document.getElementById(id);
+            if (el) el.classList.toggle('hidden', !visible);
         }
 
         // ---- ACTIONS ----
         async function setGlobalTime() {
             const t = document.getElementById('new-target-time').value;
             if (!t) return alert("Choisis une heure !");
-            document.getElementById('btn-set-time').innerText = "Lancement...";
+            const btn = document.getElementById('btn-set-time');
+            btn.innerText = "Lancement...";
+            btn.disabled = true;
             await update(ref(db, 'config'), { horaire: t });
+            btn.innerText = "Ouvrir les paris"; 
+            btn.disabled = false;
         }
 
         async function submitPari() {
             const { user } = state;
+            if (!user) return;
             const mise = document.getElementById('bet-amount').value;
             const min  = document.getElementById('bet-time').value;
+            
+            if (!mise || mise <= 0 || !min) return alert("Remplis ta mise et ton prono !");
+
             const events = [];
             if (document.getElementById('bet-objet').checked)    events.push('🦄');
             if (document.getElementById('bet-batterie').checked)  events.push('🔋');
             if (document.getElementById('bet-soleil').checked)    events.push('🌅');
             if (document.getElementById('bet-sms').checked)       events.push('📩');
             
-            // CORRECTION: Méthode d'update absolue pour éviter tout conflit entre joueurs
             const updates = {};
             updates[`scores/${user}/pari_min`] = min;
             updates[`scores/${user}/pari_mise`] = mise;
             updates[`scores/${user}/pari_events`] = events.join(',');
             
+            // Décoche automatiquement pour la prochaine fois
+            document.getElementById('bet-objet').checked = false;
+            document.getElementById('bet-batterie').checked = false;
+            document.getElementById('bet-soleil').checked = false;
+            document.getElementById('bet-sms').checked = false;
+
             await update(ref(db), updates);
         }
 
         function showConstat() {
+            // N'importe qui peut déclencher le constat s'il a parié
             state.constatVisible = true;
             render();
             window.scrollTo({ top: 0, behavior: 'smooth' });
         }
 
         async function triggerFinalCalcul() {
-            document.getElementById('btn-encaissement').innerText = "CALCUL EN COURS...";
-            document.getElementById('btn-encaissement').disabled = true;
+            const btn = document.getElementById('btn-encaissement');
+            btn.innerText = "CALCUL EN COURS...";
+            btn.disabled = true;
 
             const { user, horaire } = state;
             const snap = await get(ref(db, 'scores'));
@@ -249,43 +276,75 @@
 
             const updates = {};
             for (const [nom, player] of Object.entries(mainData)) {
+                // On ne calcule que ceux qui ont mis une mise
                 if (!player.pari_mise || player.pari_mise == "0" || player.pari_mise == "") continue;
+                
                 let multiBonus = 1;
                 const ev = player.pari_events || "";
                 if (ev.includes('🦄') && document.getElementById('real-objet').checked)    multiBonus *= 3.0;
                 if (ev.includes('🔋') && document.getElementById('real-batterie').checked)  multiBonus *= 1.5;
                 if (ev.includes('🌅') && document.getElementById('real-soleil').checked)    multiBonus *= 5.0;
                 if (ev.includes('📩') && document.getElementById('real-sms').checked)       multiBonus *= 1.2;
+                
                 const ecart = Math.abs(retardReel - parseInt(player.pari_min));
                 let multiPreci = 0;
                 if (ecart === 0) multiPreci = 5;
                 else if (ecart <= 5) multiPreci = 2;
                 else if (ecart <= 10) multiPreci = 1.2;
+                
                 const gain = Math.floor(parseInt(player.pari_mise) * multiPreci * multiBonus);
                 const nouveauSolde = parseInt(player.score || 0) - parseInt(player.pari_mise) + gain;
+                
                 updates[`scores/${nom}/score`]       = nouveauSolde;
                 updates[`scores/${nom}/pari_min`]    = "";
                 updates[`scores/${nom}/pari_mise`]   = "";
                 updates[`scores/${nom}/pari_events`] = "";
-                if (nom === user && ecart === 0) confetti({ particleCount: 200, spread: 90 });
+                
+                // Confettis si prono parfait pour l'utilisateur qui regarde
+                if (nom === user && ecart === 0 && gain > 0) confetti({ particleCount: 200, spread: 90 });
             }
+            
+            // Ferme la session
             updates['config/horaire'] = "";
             await update(ref(db), updates);
+            
             state.constatVisible = false;
-            alert("Tous les gains ont été distribués !");
+
+            // Réinitialisation de l'interface du constat
+            btn.innerText = "ENCAISSER LES POINTS 💸";
+            btn.disabled = false;
+            document.getElementById('real-objet').checked = false;
+            document.getElementById('real-batterie').checked = false;
+            document.getElementById('real-soleil').checked = false;
+            document.getElementById('real-sms').checked = false;
+
+            alert("Gains distribués, session terminée !");
         }
 
         async function resetHoraireForce() {
-            if (!confirm("Annuler la session pour tout le monde ?")) return;
-            await update(ref(db, 'config'), { horaire: "" });
+            if (!confirm("Annuler la session et EFFACER les paris en cours pour tout le monde ?")) return;
+            
+            const snap = await get(ref(db, 'scores'));
+            const mainData = snap.val() || {};
+            const updates = {};
+            
+            updates['config/horaire'] = "";
+            
+            // On vide proprement les paris de TOUS les joueurs détectés dans la DB
+            for (const nom of Object.keys(mainData)) {
+                updates[`scores/${nom}/pari_min`] = "";
+                updates[`scores/${nom}/pari_mise`] = "";
+                updates[`scores/${nom}/pari_events`] = "";
+            }
+            
+            await update(ref(db), updates);
         }
 
         function logout() {
             state.user = "";
             state.constatVisible = false;
-            // CORRECTION
             sessionStorage.removeItem('eliott_user');
-            document.getElementById('user-list').innerHTML = '';
+            document.getElementById('user-list').innerHTML = ''; // Force regen list
             render();
         }
 
