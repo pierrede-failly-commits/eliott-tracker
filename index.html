@@ -121,6 +121,7 @@
         let globalTargetTime = "";
         let isLapinSession = false;
         let myBetPlaced = false;
+        let lastScoresData = {};
 
         // --- LISTENERS TEMPS RÉEL ---
 
@@ -133,9 +134,9 @@
             });
 
             onValue(ref(db, 'scores'), (snapshot) => {
-                const data = snapshot.val() || {};
+                lastScoresData = snapshot.val() || {};
                 const user = localStorage.getItem('eliott_user');
-                renderScores(data, user);
+                renderScores(lastScoresData, user);
             });
         }
 
@@ -313,6 +314,7 @@
                 }
             } else {
                 document.getElementById('welcome-msg').innerText = "Salut " + user;
+                renderScores(lastScoresData, user);
             }
         }
 
