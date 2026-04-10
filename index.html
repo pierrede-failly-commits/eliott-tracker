@@ -116,111 +116,131 @@
 
         const app = initializeApp(firebaseConfig);
         const db = getDatabase(app);
+        
 
+        // ---- ÉTAT GLOBAL ----
         const potes = ["Pierre", "Charles", "Abel", "Titouan", "Guillaume"];
-        let globalTargetTime = "";
-        let isLapinSession = false;
-        let myBetPlaced = false;
-        let lastScoresData = {};
+        const state = {
+            horaire: "",
+            lapin: false,
+            scores: {},      // { Pierre: { score, pari_min, pari_mise, pari_events }, ... }
+            user: localStorage.getItem('eliott_user') || "",
+            constatVisible: false,
+        };
 
-        // --- LISTENERS TEMPS RÉEL ---
+        // ---- LISTENERS FIREBASE ----
+        // Les deux listeners mettent à jour state et appellent render()
 
-        function startListeners() {
-            onValue(ref(db, 'config'), (snapshot) => {
-                const config = snapshot.val() || {};
-                globalTargetTime = config.horaire || "";
-                isLapinSession = config.lapin === "OUI";
-                renderUI();
-            });
+        onValue(ref(db, 'config'), (snap) => {
+            const c = snap.val() || {};
+            state.horaire = c.horaire || "";
+            state.lapin   = c.lapin === "OUI";
+            render();
+        });
 
-            onValue(ref(db, 'scores'), (snapshot) => {
-                lastScoresData = snapshot.val() || {};
-                const user = localStorage.getItem('eliott_user');
-                renderScores(lastScoresData, user);
-            });
-        }
+        onValue(ref(db, 'scores'), (snap) => {
+            state.scores = snap.val() || {};
+            render();
+        });
 
-        function renderScores(data, user) {
-            const players = Object.entries(data).map(([nom, vals]) => ({ nom, ...vals }));
-            myBetPlaced = false;
+        // ---- RENDER UNIQUE ----
+        // Appelé à chaque changement d'état. Lit state, décide tout.
 
-            const html = `
+        function render() {
+            const { horaire, lapin, scores, user, constatVisible } = state;
+            const players = Object.entries(scores).map(([nom, v]) => ({ nom, ...v }));
+            const me = players.find(p => p.nom === user);
+            const myBetPlaced = me && me.pari_mise && me.pari_mise !== "" && me.pari_mise !== "0";
+
+            // -- Écrans principaux --
+            show('setup-screen',  !horaire);
+            show('login-screen',  !!horaire && !user);
+            show('main-screen',   !!horaire && !!user);
+
+            // -- Setup screen : liste des potes --
+            if (!user) {
+                const list = document.getElementById('user-list');
+                if (list.innerHTML === "") {
+                    potes.forEach(p => {
+                        const b = document.createElement('button');
+                        b.className = "bg-slate-700 py-4 rounded-xl font-bold uppercase text-sm active:bg-blue-600 transition-colors";
+                        b.innerText = p;
+                        b.onclick = () => { state.user = p; localStorage.setItem('eliott_user', p); render(); };
+                        list.appendChild(b);
+                    });
+                }
+            }
+
+            // -- Main screen --
+            if (horaire && user) {
+                document.getElementById('welcome-msg').innerText = "Salut " + user;
+                document.getElementById('user-balance').innerText = (me && me.score !== undefined ? me.score : 0) + " EC";
+                document.getElementById('display-target').innerText = "Cible : " + horaire;
+                show('lapin-alert', lapin);
+
+                // Zones de pari / flash / constat
+                show('bet-zone',       !myBetPlaced && !constatVisible);
+                show('flash-container', !!myBetPlaced && !constatVisible);
+                show('constat-zone',    constatVisible);
+            }
+
+            // -- Leaderboard (affiché partout) --
+            const lb = `
                 <div class="mt-2">
                     <h3 class="text-[10px] font-black text-gray-500 uppercase mb-4 tracking-widest text-center">🏆 Espionnage des Paris</h3>
                     <div class="space-y-3">
-                        ${players.sort((a,b) => (b.score||0) - (a.score||0)).map(d => {
+                        ${players.sort((a,b) => (b.score||0)-(a.score||0)).map(d => {
                             const hasBet = d.pari_mise && d.pari_mise !== "0" && d.pari_mise !== "";
-                            if (d.nom === user && hasBet) myBetPlaced = true;
                             return `
                             <div class="bg-slate-800/40 p-3 rounded-xl border border-slate-700/50">
                                 <div class="flex justify-between items-center mb-2">
                                     <span class="font-bold text-slate-200">${d.nom}</span>
                                     <span class="font-mono text-blue-400 font-bold">${d.score !== undefined ? d.score : 0} EC</span>
                                 </div>
-                                ${hasBet ? `
-                                    <div class="flex flex-wrap gap-2 items-center bg-slate-900/50 p-2 rounded-lg">
+                                ${hasBet
+                                    ? `<div class="flex flex-wrap gap-2 items-center bg-slate-900/50 p-2 rounded-lg">
                                         <span class="text-xs text-green-400 font-bold">${d.pari_mise} EC sur ${d.pari_min} min</span>
                                         ${d.pari_events ? d.pari_events.split(',').map(e => `<span class="pari-tag">${e}</span>`).join('') : ''}
-                                    </div>
-                                ` : `<div class="text-[10px] text-slate-500 italic bg-slate-900/30 p-2 rounded-lg">En pleine réflexion...</div>`}
+                                       </div>`
+                                    : `<div class="text-[10px] text-slate-500 italic bg-slate-900/30 p-2 rounded-lg">En pleine réflexion...</div>`
+                                }
                             </div>`;
                         }).join('')}
                     </div>
                 </div>`;
-
-            document.querySelectorAll('.leaderboard-section').forEach(el => el.innerHTML = html);
-
-            // Ne mettre à jour le solde et la bet-zone que si le main-screen est visible
-            const mainVisible = !document.getElementById('main-screen').classList.contains('hidden');
-            if (!user || !mainVisible) return;
-
-            const me = players.find(d => d.nom === user);
-            document.getElementById('user-balance').innerText = (me && me.score !== undefined ? me.score : 0) + " EC";
-
-            if (myBetPlaced) {
-                document.getElementById('bet-zone').classList.add('hidden');
-                if (document.getElementById('constat-zone').classList.contains('hidden')) {
-                    document.getElementById('flash-container').classList.remove('hidden');
-                }
-            } else {
-                document.getElementById('bet-zone').classList.remove('hidden');
-                document.getElementById('flash-container').classList.add('hidden');
-            }
+            document.querySelectorAll('.leaderboard-section').forEach(el => el.innerHTML = lb);
         }
 
-        // --- ACTIONS ---
+        function show(id, visible) {
+            document.getElementById(id).classList.toggle('hidden', !visible);
+        }
+
+        // ---- ACTIONS ----
 
         async function setGlobalTime() {
             const t = document.getElementById('new-target-time').value;
-            const lapin = document.getElementById('check-lapin-setup').checked ? "OUI" : "NON";
             if (!t) return alert("Choisis une heure !");
             document.getElementById('btn-set-time').innerText = "Lancement...";
+            const lapin = document.getElementById('check-lapin-setup').checked ? "OUI" : "NON";
             await update(ref(db, 'config'), { horaire: t, lapin });
         }
 
         async function submitPari() {
-            const user = localStorage.getItem('eliott_user');
+            const { user } = state;
             const mise = document.getElementById('bet-amount').value;
-            const min = document.getElementById('bet-time').value;
-            let events = [];
-            if (document.getElementById('bet-objet').checked) events.push('🦄');
-            if (document.getElementById('bet-batterie').checked) events.push('🔋');
-            if (document.getElementById('bet-soleil').checked) events.push('🌅');
-            if (document.getElementById('bet-sms').checked) events.push('📩');
-
-            document.getElementById('bet-zone').innerHTML = '<p class="text-center text-blue-400 font-bold py-10 animate-pulse">Pari en cours...</p>';
-
-            await update(ref(db, `scores/${user}`), {
-                pari_min: min,
-                pari_mise: mise,
-                pari_events: events.join(',')
-            });
+            const min  = document.getElementById('bet-time').value;
+            const events = [];
+            if (document.getElementById('bet-objet').checked)    events.push('🦄');
+            if (document.getElementById('bet-batterie').checked)  events.push('🔋');
+            if (document.getElementById('bet-soleil').checked)    events.push('🌅');
+            if (document.getElementById('bet-sms').checked)       events.push('📩');
+            await update(ref(db, `scores/${user}`), { pari_min: min, pari_mise: mise, pari_events: events.join(',') });
         }
 
         function showConstat() {
-            document.getElementById('flash-container').classList.add('hidden');
-            document.getElementById('constat-zone').classList.remove('hidden');
-            window.scrollTo({top: 0, behavior: 'smooth'});
+            state.constatVisible = true;
+            render();
+            window.scrollTo({ top: 0, behavior: 'smooth' });
         }
 
         async function confirmAbsent() {
@@ -233,50 +253,42 @@
             document.getElementById('btn-encaissement').innerText = "CALCUL EN COURS...";
             document.getElementById('btn-encaissement').disabled = true;
 
-            const user = localStorage.getItem('eliott_user');
-            const snapshot = await get(ref(db, 'scores'));
-            const mainData = snapshot.val() || {};
+            const { user, horaire } = state;
+            const snap = await get(ref(db, 'scores'));
+            const mainData = snap.val() || {};
 
             const now = new Date();
-            const [h, m] = globalTargetTime.split(':');
+            const [h, m] = horaire.split(':');
             const target = new Date(); target.setHours(h, m, 0, 0);
             const retardReel = Math.floor((now - target) / 60000);
 
             const updates = {};
-
             for (const [nom, player] of Object.entries(mainData)) {
                 if (!player.pari_mise || player.pari_mise == "0" || player.pari_mise == "") continue;
-
                 let multiBonus = 1;
-                const events = player.pari_events || "";
-                if (events.includes('🦄') && document.getElementById('real-objet').checked) multiBonus *= 3.0;
-                if (events.includes('🔋') && document.getElementById('real-batterie').checked) multiBonus *= 1.5;
-                if (events.includes('🌅') && document.getElementById('real-soleil').checked) multiBonus *= 5.0;
-                if (events.includes('📩') && document.getElementById('real-sms').checked) multiBonus *= 1.2;
-
+                const ev = player.pari_events || "";
+                if (ev.includes('🦄') && document.getElementById('real-objet').checked)    multiBonus *= 3.0;
+                if (ev.includes('🔋') && document.getElementById('real-batterie').checked)  multiBonus *= 1.5;
+                if (ev.includes('🌅') && document.getElementById('real-soleil').checked)    multiBonus *= 5.0;
+                if (ev.includes('📩') && document.getElementById('real-sms').checked)       multiBonus *= 1.2;
                 const ecart = Math.abs(retardReel - parseInt(player.pari_min));
                 let multiPreci = 0;
                 if (ecart === 0) multiPreci = 5;
                 else if (ecart <= 5) multiPreci = 2;
                 else if (ecart <= 10) multiPreci = 1.2;
-
                 const gain = Math.floor(parseInt(player.pari_mise) * multiPreci * multiBonus);
                 const nouveauSolde = parseInt(player.score || 0) - parseInt(player.pari_mise) + gain;
-
-                updates[`scores/${nom}/score`] = nouveauSolde;
-                updates[`scores/${nom}/pari_min`] = "";
-                updates[`scores/${nom}/pari_mise`] = "";
+                updates[`scores/${nom}/score`]       = nouveauSolde;
+                updates[`scores/${nom}/pari_min`]    = "";
+                updates[`scores/${nom}/pari_mise`]   = "";
                 updates[`scores/${nom}/pari_events`] = "";
-
                 if (nom === user && ecart === 0) confetti({ particleCount: 200, spread: 90 });
             }
-
             updates['config/horaire'] = "";
-            updates['config/lapin'] = "";
-
+            updates['config/lapin']   = "";
             await update(ref(db), updates);
+            state.constatVisible = false;
             alert("Tous les gains ont été distribués !");
-            location.reload();
         }
 
         async function resetHoraireForce() {
@@ -285,62 +297,34 @@
         }
 
         function logout() {
+            state.user = "";
+            state.constatVisible = false;
             localStorage.removeItem('eliott_user');
-            myBetPlaced = false;
-            document.getElementById('bet-zone').classList.add('hidden');
-            document.getElementById('flash-container').classList.add('hidden');
-            document.getElementById('constat-zone').classList.add('hidden');
             document.getElementById('user-list').innerHTML = '';
-            renderUI();
+            render();
         }
 
-        function renderUI() {
-            const user = localStorage.getItem('eliott_user');
-            document.getElementById('setup-screen').classList.toggle('hidden', !!globalTargetTime);
-            document.getElementById('login-screen').classList.toggle('hidden', !globalTargetTime || !!user);
-            document.getElementById('main-screen').classList.toggle('hidden', !globalTargetTime || !user);
-            document.getElementById('lapin-alert').classList.toggle('hidden', !isLapinSession);
-            if (globalTargetTime) document.getElementById('display-target').innerText = "Cible : " + globalTargetTime;
-            if (!user) {
-                const list = document.getElementById('user-list');
-                if (list.innerHTML === "") {
-                    potes.forEach(p => {
-                        const b = document.createElement('button');
-                        b.className = "bg-slate-700 py-4 rounded-xl font-bold uppercase text-sm active:bg-blue-600 transition-colors";
-                        b.innerText = p;
-                        b.onclick = () => { localStorage.setItem('eliott_user', p); renderUI(); };
-                        list.appendChild(b);
-                    });
-                }
-            } else {
-                document.getElementById('welcome-msg').innerText = "Salut " + user;
-                renderScores(lastScoresData, user);
-            }
-        }
-
-        // Chrono
+        // ---- CHRONO ----
         setInterval(() => {
-            if (!globalTargetTime) return;
+            if (!state.horaire) return;
             const now = new Date();
-            const [h, m] = globalTargetTime.split(':');
+            const [h, m] = state.horaire.split(':');
             const target = new Date(); target.setHours(h, m, 0, 0);
             const diff = now - target;
             const sign = diff >= 0 ? "+" : "-";
             const abs = new Date(Math.abs(diff));
-            document.getElementById('chrono').innerText = sign + abs.toISOString().substr(11, 8);
+            const el = document.getElementById('chrono');
+            if (el) el.innerText = sign + abs.toISOString().substr(11, 8);
         }, 1000);
 
-        // Exposer les fonctions au HTML (obligatoire avec type="module")
-        window.setGlobalTime = setGlobalTime;
-        window.submitPari = submitPari;
-        window.showConstat = showConstat;
-        window.confirmAbsent = confirmAbsent;
+        // ---- EXPOSER AU HTML ----
+        window.setGlobalTime     = setGlobalTime;
+        window.submitPari        = submitPari;
+        window.showConstat       = showConstat;
+        window.confirmAbsent     = confirmAbsent;
         window.triggerFinalCalcul = triggerFinalCalcul;
         window.resetHoraireForce = resetHoraireForce;
-        window.logout = logout;
-
-        // Lancement
-        startListeners();
+        window.logout            = logout;
     </script>
 </body>
 </html>
