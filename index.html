@@ -155,7 +155,7 @@
                             <div class="bg-slate-800/40 p-3 rounded-xl border border-slate-700/50">
                                 <div class="flex justify-between items-center mb-2">
                                     <span class="font-bold text-slate-200">${d.nom}</span>
-                                    <span class="font-mono text-blue-400 font-bold">${d.score || 0} EC</span>
+                                    <span class="font-mono text-blue-400 font-bold">${d.score !== undefined ? d.score : 0} EC</span>
                                 </div>
                                 ${hasBet ? `
                                     <div class="flex flex-wrap gap-2 items-center bg-slate-900/50 p-2 rounded-lg">
@@ -170,21 +170,21 @@
 
             document.querySelectorAll('.leaderboard-section').forEach(el => el.innerHTML = html);
 
-            const me = players.find(d => d.nom === user);
-            if (me && document.getElementById('user-balance')) {
-                document.getElementById('user-balance').innerText = (me.score !== undefined ? me.score : 0) + " EC";
-            }
+            // Ne mettre à jour le solde et la bet-zone que si le main-screen est visible
+            const mainVisible = !document.getElementById('main-screen').classList.contains('hidden');
+            if (!user || !mainVisible) return;
 
-            if (user) {
-                if (myBetPlaced) {
-                    document.getElementById('bet-zone').classList.add('hidden');
-                    if (document.getElementById('constat-zone').classList.contains('hidden')) {
-                        document.getElementById('flash-container').classList.remove('hidden');
-                    }
-                } else {
-                    document.getElementById('bet-zone').classList.remove('hidden');
-                    document.getElementById('flash-container').classList.add('hidden');
+            const me = players.find(d => d.nom === user);
+            document.getElementById('user-balance').innerText = (me && me.score !== undefined ? me.score : 0) + " EC";
+
+            if (myBetPlaced) {
+                document.getElementById('bet-zone').classList.add('hidden');
+                if (document.getElementById('constat-zone').classList.contains('hidden')) {
+                    document.getElementById('flash-container').classList.remove('hidden');
                 }
+            } else {
+                document.getElementById('bet-zone').classList.remove('hidden');
+                document.getElementById('flash-container').classList.add('hidden');
             }
         }
 
