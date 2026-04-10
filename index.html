@@ -25,11 +25,6 @@
         <p class="text-center text-gray-400 text-sm mb-4">À quelle heure est le rendez-vous ?</p>
         <input type="time" id="new-target-time" class="w-full p-4 rounded-xl text-4xl mb-6 text-center font-mono">
         
-        <label class="flex items-center justify-center gap-3 mb-6 p-4 bg-slate-800 rounded-xl border border-dashed border-slate-600">
-            <span class="font-bold text-orange-400 uppercase text-sm">🚨 Risque de Lapin ?</span>
-            <input type="checkbox" id="check-lapin-setup">
-        </label>
-        
         <button onclick="setGlobalTime()" id="btn-set-time" class="btn-primary bg-green-600 text-lg">Ouvrir les paris</button>
         <div class="leaderboard-section mt-8"></div>
     </div>
@@ -49,7 +44,6 @@
             </div>
             <div class="flex flex-col items-end gap-2">
                 <button onclick="logout()" class="text-[10px] bg-slate-800 px-3 py-2 rounded-lg border border-slate-700 font-bold uppercase">Quitter</button>
-                <div id="lapin-alert" class="hidden bg-orange-500/20 text-orange-500 text-[10px] px-2 py-1 rounded border border-orange-500/50 font-bold uppercase animate-pulse">⚠️ Option Lapin</div>
             </div>
         </header>
 
@@ -81,7 +75,6 @@
 
         <div id="flash-container" class="hidden space-y-4 mb-8">
             <button onclick="showConstat()" class="btn-flash active:scale-95 transition-transform">📸 ELIOTT FLASHÉ</button>
-            <button onclick="confirmAbsent()" class="w-full py-4 rounded-xl border-2 border-slate-700 bg-slate-800 text-slate-400 font-bold uppercase text-sm active:bg-slate-700">❌ Eliott Absent (Lapin)</button>
         </div>
 
         <div id="constat-zone" class="card border-red-500 bg-red-900/10 hidden">
@@ -117,12 +110,10 @@
         const app = initializeApp(firebaseConfig);
         const db = getDatabase(app);
         
-
         // ---- ÉTAT GLOBAL ----
         const potes = ["Pierre", "Charles", "Abel", "Titouan", "Guillaume"];
         const state = {
             horaire: "",
-            lapin: false,
             scores: {},      // { Pierre: { score, pari_min, pari_mise, pari_events }, ... }
             user: localStorage.getItem('eliott_user') || "",
             constatVisible: false,
@@ -134,7 +125,6 @@
         onValue(ref(db, 'config'), (snap) => {
             const c = snap.val() || {};
             state.horaire = c.horaire || "";
-            state.lapin   = c.lapin === "OUI";
             render();
         });
 
@@ -147,7 +137,7 @@
         // Appelé à chaque changement d'état. Lit state, décide tout.
 
         function render() {
-            const { horaire, lapin, scores, user, constatVisible } = state;
+            const { horaire, scores, user, constatVisible } = state;
             const players = Object.entries(scores).map(([nom, v]) => ({ nom, ...v }));
             const me = players.find(p => p.nom === user);
             const myBetPlaced = me && me.pari_mise && me.pari_mise !== "" && me.pari_mise !== "0";
@@ -176,7 +166,6 @@
                 document.getElementById('welcome-msg').innerText = "Salut " + user;
                 document.getElementById('user-balance').innerText = (me && me.score !== undefined ? me.score : 0) + " EC";
                 document.getElementById('display-target').innerText = "Cible : " + horaire;
-                show('lapin-alert', lapin);
 
                 // Zones de pari / flash / constat
                 show('bet-zone',       !myBetPlaced && !constatVisible);
@@ -221,8 +210,7 @@
             const t = document.getElementById('new-target-time').value;
             if (!t) return alert("Choisis une heure !");
             document.getElementById('btn-set-time').innerText = "Lancement...";
-            const lapin = document.getElementById('check-lapin-setup').checked ? "OUI" : "NON";
-            await update(ref(db, 'config'), { horaire: t, lapin });
+            await update(ref(db, 'config'), { horaire: t });
         }
 
         async function submitPari() {
@@ -241,12 +229,6 @@
             state.constatVisible = true;
             render();
             window.scrollTo({ top: 0, behavior: 'smooth' });
-        }
-
-        async function confirmAbsent() {
-            if (!confirm("Es-tu sûr ? Session annulée pour tout le monde.")) return;
-            await update(ref(db, 'config'), { horaire: "", lapin: "" });
-            alert("Session annulée. Eliott est officiellement un lapin. 🐰");
         }
 
         async function triggerFinalCalcul() {
@@ -285,7 +267,6 @@
                 if (nom === user && ecart === 0) confetti({ particleCount: 200, spread: 90 });
             }
             updates['config/horaire'] = "";
-            updates['config/lapin']   = "";
             await update(ref(db), updates);
             state.constatVisible = false;
             alert("Tous les gains ont été distribués !");
@@ -293,7 +274,7 @@
 
         async function resetHoraireForce() {
             if (!confirm("Annuler la session pour tout le monde ?")) return;
-            await update(ref(db, 'config'), { horaire: "", lapin: "" });
+            await update(ref(db, 'config'), { horaire: "" });
         }
 
         function logout() {
@@ -321,7 +302,6 @@
         window.setGlobalTime     = setGlobalTime;
         window.submitPari        = submitPari;
         window.showConstat       = showConstat;
-        window.confirmAbsent     = confirmAbsent;
         window.triggerFinalCalcul = triggerFinalCalcul;
         window.resetHoraireForce = resetHoraireForce;
         window.logout            = logout;
