@@ -171,10 +171,10 @@
 
             const me = players.find(d => d.nom === user);
             if (me && document.getElementById('user-balance')) {
-                document.getElementById('user-balance').innerText = (me.score || 0) + " EC";
+                document.getElementById('user-balance').innerText = (me.score !== undefined ? me.score : 0) + " EC";
             }
 
-            if (globalTargetTime && user) {
+            if (user) {
                 if (myBetPlaced) {
                     document.getElementById('bet-zone').classList.add('hidden');
                     if (document.getElementById('constat-zone').classList.contains('hidden')) {
