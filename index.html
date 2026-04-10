@@ -286,7 +286,11 @@
         function logout() {
             localStorage.removeItem('eliott_user');
             myBetPlaced = false;
-            location.reload();
+            document.getElementById('bet-zone').classList.add('hidden');
+            document.getElementById('flash-container').classList.add('hidden');
+            document.getElementById('constat-zone').classList.add('hidden');
+            document.getElementById('user-list').innerHTML = '';
+            renderUI();
         }
 
         function renderUI() {
