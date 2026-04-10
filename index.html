@@ -114,14 +114,13 @@
         const potes = ["Pierre", "Charles", "Abel", "Titouan", "Guillaume"];
         const state = {
             horaire: "",
-            scores: {},      // { Pierre: { score, pari_min, pari_mise, pari_events }, ... }
-            user: localStorage.getItem('eliott_user') || "",
+            scores: {},
+            // CORRECTION: Utilisation de sessionStorage au lieu de localStorage
+            user: sessionStorage.getItem('eliott_user') || "",
             constatVisible: false,
         };
 
         // ---- LISTENERS FIREBASE ----
-        // Les deux listeners mettent à jour state et appellent render()
-
         onValue(ref(db, 'config'), (snap) => {
             const c = snap.val() || {};
             state.horaire = c.horaire || "";
@@ -134,20 +133,16 @@
         });
 
         // ---- RENDER UNIQUE ----
-        // Appelé à chaque changement d'état. Lit state, décide tout.
-
         function render() {
             const { horaire, scores, user, constatVisible } = state;
             const players = Object.entries(scores).map(([nom, v]) => ({ nom, ...v }));
             const me = players.find(p => p.nom === user);
             const myBetPlaced = me && me.pari_mise && me.pari_mise !== "" && me.pari_mise !== "0";
 
-            // -- Écrans principaux --
             show('setup-screen',  !horaire);
             show('login-screen',  !!horaire && !user);
             show('main-screen',   !!horaire && !!user);
 
-            // -- Setup screen : liste des potes --
             if (!user) {
                 const list = document.getElementById('user-list');
                 if (list.innerHTML === "") {
@@ -155,25 +150,27 @@
                         const b = document.createElement('button');
                         b.className = "bg-slate-700 py-4 rounded-xl font-bold uppercase text-sm active:bg-blue-600 transition-colors";
                         b.innerText = p;
-                        b.onclick = () => { state.user = p; localStorage.setItem('eliott_user', p); render(); };
+                        b.onclick = () => { 
+                            state.user = p; 
+                            // CORRECTION: Sauvegarde dans la session de l'onglet uniquement
+                            sessionStorage.setItem('eliott_user', p); 
+                            render(); 
+                        };
                         list.appendChild(b);
                     });
                 }
             }
 
-            // -- Main screen --
             if (horaire && user) {
                 document.getElementById('welcome-msg').innerText = "Salut " + user;
                 document.getElementById('user-balance').innerText = (me && me.score !== undefined ? me.score : 0) + " EC";
                 document.getElementById('display-target').innerText = "Cible : " + horaire;
 
-                // Zones de pari / flash / constat
                 show('bet-zone',       !myBetPlaced && !constatVisible);
                 show('flash-container', !!myBetPlaced && !constatVisible);
                 show('constat-zone',    constatVisible);
             }
 
-            // -- Leaderboard (affiché partout) --
             const lb = `
                 <div class="mt-2">
                     <h3 class="text-[10px] font-black text-gray-500 uppercase mb-4 tracking-widest text-center">🏆 Espionnage des Paris</h3>
@@ -205,7 +202,6 @@
         }
 
         // ---- ACTIONS ----
-
         async function setGlobalTime() {
             const t = document.getElementById('new-target-time').value;
             if (!t) return alert("Choisis une heure !");
@@ -222,7 +218,14 @@
             if (document.getElementById('bet-batterie').checked)  events.push('🔋');
             if (document.getElementById('bet-soleil').checked)    events.push('🌅');
             if (document.getElementById('bet-sms').checked)       events.push('📩');
-            await update(ref(db, `scores/${user}`), { pari_min: min, pari_mise: mise, pari_events: events.join(',') });
+            
+            // CORRECTION: Méthode d'update absolue pour éviter tout conflit entre joueurs
+            const updates = {};
+            updates[`scores/${user}/pari_min`] = min;
+            updates[`scores/${user}/pari_mise`] = mise;
+            updates[`scores/${user}/pari_events`] = events.join(',');
+            
+            await update(ref(db), updates);
         }
 
         function showConstat() {
@@ -280,7 +283,8 @@
         function logout() {
             state.user = "";
             state.constatVisible = false;
-            localStorage.removeItem('eliott_user');
+            // CORRECTION
+            sessionStorage.removeItem('eliott_user');
             document.getElementById('user-list').innerHTML = '';
             render();
         }
